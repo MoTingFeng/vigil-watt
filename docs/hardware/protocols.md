@@ -522,3 +522,55 @@ report ID `0x03` 的输入数据为 4 字节：
 ### 6.2 安全边界
 
 插件只被动读取 report `0x03`，不发送官方网页驱动中的 report `0x04` 命令。样本中 report `0x03` 约每 2 秒到达；无报告时以 90 秒静默作为离线兜底。迈从插件也必须按 VID 排除该接收器，避免把其 64 字节输出 collection 当成迈从接口。充电状态已通过接线实测确认；暂未采集满电状态编码。
+
+## 7. VGN 维盛（接收器 VID_320F&PID_5088）—— ✅ 键盘电量已打通
+
+### 7.1 实测身份与接口地图
+
+VID `0x320F` 属深圳 Evision 半导体（多家品牌共用）；PID `0x5088` 与第三方项目已验证的 VGN V98Pro 2.4G 接收器完全相同，本机实测设备为 **VGN S99 键盘**。接收器同时暴露键盘与鼠标 HID 集合，归属**不能靠"像不像键盘"判断**，要看 VID 与协议。
+
+| 接口 | usagePage / usage | IN / OUT / FEAT |
+|---|---|---|
+| `mi_00` | `0x0001` / `0x0006` 键盘 | 9 / 2 / 65 |
+| `mi_01&col01` | `0x0001` / `0x0006` 键盘 | 16 / 0 / 0 |
+| `mi_01&col02` | `0x0001` / `0x0080` 系统控制 | 2 / 0 / 0 |
+| `mi_01&col03` | `0x000C` / `0x0001` consumer | 3 / 0 / 0 |
+| **`mi_01&col04`** | **`0xFF1C` / `0x0092` 厂商** | **64 / 64 / 0** ← 电量通道 |
+| `mi_01&col05` | `0x0001` / `0x0000` | 33 / 33 / 0 |
+| `mi_01&col06` | `0x0001` / `0x0002` 鼠标 | 8 / 0 / 0 |
+
+### 7.2 帧格式
+
+```
+发送：Output Report，Report ID = 4
+      payload = 00 00 1A 06 00 00 00   （不足 64 字节补 0）
+
+接收：Input Report，Report ID = 4
+      [3] == 0x1A   → 这是电量应答
+      [8]           → 电量百分比（0~100）
+      [9]           → 充电标志（非 0 = 充电中）
+```
+
+真机实测（2026-10-19，本机 VGN S99）：
+
+```
+using vid_320f&pid_5088&mi_01&col04 (page=0xFF1C usage=0x0092 OUT=64 IN=64)
+writing 64 bytes: 04 00 00 1A 06 00 00 00
+write -> ok
+  read #1 -> 64 bytes: 04 00 00 1A 06 00 00 00 52 00 00 00 00 00 00 00
+*** WEISHENG BATTERY REPLY ***  percent = 82%  charging = no
+```
+
+协议出自第三方逆向项目 [MuyuDada/VGNKeyboardBattery](https://github.com/MuyuDada/VGNKeyboardBattery)（MIT，已在 V98Pro 真机验证）。
+
+### 7.3 ⚠ 两个必须避开的坑
+
+1. **必须走中断 OUT 端点（`WriteFile`），不能用 `HidD_SetOutputReport`**：该键盘的厂商通道只在中断 OUT 端点接收指令；`HidD_SetOutputReport` 走控制传输，**会返回成功但设备完全不理会**，表现为"命令发出去了却永远收不到回包"。应用内 `HidDeviceHandle.WriteOutput` 底层就是 `FileStream.WriteAsync`，直接用它即安全。
+2. **HID 接口路径解析**：`SP_DEVICE_INTERFACE_DETAIL_DATA_W` 的 `cbSize` 在 x64 要填 **8**，而 `DevicePath` 的偏移是 **4**（不是 8）。两者写错任何一个都会得到缺 `\\` 前缀的坏路径，`CreateFile` 报 `err=123`。只影响自写探测脚本，应用内走 `HidDeviceScanner` 不受影响。
+
+### 7.4 安全与开关
+
+- 只发官方驱动自用的**只读电量查询帧**，没有任何写配置 / 改状态的命令。
+- 品牌级总开关 `PluginEnabled["Vgn"]`，**默认关闭**：遵循 safety.md §3 规则 2「会写帧的新插件必须默认关闭」。北通是"官方同款只读命令 ⇒ 默认开"的先例，是否照此放宽由上游定。
+- 离线判定：协议**没有连接状态字段**，只能靠主动查询失败计数（连续 3 次 ≈ 3 分钟）熔断并标离线（同迈从）。
+- 迈从插件已按 VID 排除本接收器（`MchosePlugin.IsCandidate`），避免对 VGN dongle 发 QHW / 0x13 帧。
