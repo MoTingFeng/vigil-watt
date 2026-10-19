@@ -183,50 +183,54 @@ public class TaskbarLayoutTests
         Assert.Equal(1720 - 120 - 4, rx);
     }
 
-    // T18：锚点 = 任务栏起始端（横向就是最左边，开始按钮那一侧）
+    // T18：锚点 = 按钮区左侧（避开最左端的天气/搜索小组件）
     [Fact]
-    public void Place_AnchorLeft_SitsAtTaskbarStart()
+    public void Place_AnchorLeft_StartsAtButtonArea()
     {
-        var (x, y) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Left, 0, 6, out int applied);
+        // 按钮区从 389 起算 → 389 + EdgeInset
+        var (x, y) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Left, 0, 6,
+            out int applied, buttonsLeft: 389);
 
-        Assert.Equal(TaskbarLayout.EdgeInsetPx, x);
+        Assert.Equal(389 + TaskbarLayout.EdgeInsetPx, x);
         Assert.Equal(1032 + (48 - 36) / 2, y);
         Assert.Equal(0, applied);
     }
 
-    // T19：锚点 = 居中
+    // T18b：读不到按钮区（传 0）时退回任务栏左缘，不能因此不显示
     [Fact]
-    public void Place_AnchorCenter_SitsInTaskbarMiddle()
+    public void Place_AnchorLeft_FallsBackToTaskbarEdgeWhenButtonsUnknown()
     {
-        var (x, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Center, 0, 6, out int applied);
+        var (x, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Left, 0, 6, out _);
 
-        Assert.Equal((1920 - 200) / 2, x);
-        Assert.Equal(0, applied);
+        Assert.Equal(TaskbarLayout.EdgeInsetPx, x);
     }
 
-    // T20：锚点之上仍叠加拖动偏移；撞到起始端被夹住并把落点反推
+    // T20：锚点之上仍叠加拖动偏移；撞到边界被夹住并把落点反推
     [Fact]
     public void Place_AnchorLeft_OffsetStillAppliesAndClamps()
     {
-        var (x, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Left, 300, 6, out int applied);
-        Assert.Equal(TaskbarLayout.EdgeInsetPx + 300, x);
+        var (x, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Left, 300, 6,
+            out int applied, buttonsLeft: 389);
+        Assert.Equal(389 + TaskbarLayout.EdgeInsetPx + 300, x);
         Assert.Equal(300, applied);
 
-        var (cx, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Left, -5000, 6, out int clamped);
-        Assert.Equal(TaskbarLayout.EdgeInsetPx, cx);
-        Assert.Equal(0, clamped);
+        var (cx, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Left, -5000, 6,
+            out int clamped, buttonsLeft: 389);
+        Assert.Equal(TaskbarLayout.EdgeInsetPx, cx);   // 夹到任务栏左缘（不是按钮区左缘）
+        Assert.Equal(TaskbarLayout.EdgeInsetPx - (389 + TaskbarLayout.EdgeInsetPx), clamped);
     }
 
-    // T21：竖向任务栏的锚点沿竖直方向（"起始端"= 上端）
+    // T21：竖向任务栏的锚点沿竖直方向（"左侧"= 按钮区上端）
     [Fact]
     public void Place_VerticalAnchors_AlongVerticalAxis()
     {
         var taskbar = new PixelRect(0, 0, 48, 1080);
-        var (_, top) = TaskbarLayout.Place(taskbar, default, 40, 36, PillAnchor.Left, 0, 6, out _);
-        Assert.Equal(TaskbarLayout.EdgeInsetPx, top);
+        var (_, top) = TaskbarLayout.Place(taskbar, default, 40, 36, PillAnchor.Left, 0, 6,
+            out _, buttonsLeft: 120);
+        Assert.Equal(120 + TaskbarLayout.EdgeInsetPx, top);
 
-        var (_, mid) = TaskbarLayout.Place(taskbar, default, 40, 36, PillAnchor.Center, 0, 6, out _);
-        Assert.Equal((1080 - 36) / 2, mid);
+        var (_, fallback) = TaskbarLayout.Place(taskbar, default, 40, 36, PillAnchor.Left, 0, 6, out _);
+        Assert.Equal(TaskbarLayout.EdgeInsetPx, fallback);
     }
 }
 
@@ -263,14 +267,14 @@ public class TaskbarBatteryOptionsTests
             n => Assert.Equal(n, TaskbarBatteryOptions.Clamp(n)));
     }
 
-    // T22：位置锚点只认三个合法值，其余（含 null / 手改的乱值）一律按 Tray（改造前的行为）
+    // T22：位置锚点只认两个合法值，其余（含 null / 手改的乱值 / 已废弃的 Center）一律按 Tray
     [Theory]
     [InlineData(null, TaskbarPillAnchor.Tray)]
     [InlineData("", TaskbarPillAnchor.Tray)]
     [InlineData("Left", TaskbarPillAnchor.Left)]
-    [InlineData("Center", TaskbarPillAnchor.Center)]
     [InlineData("Tray", TaskbarPillAnchor.Tray)]
     [InlineData("left", TaskbarPillAnchor.Tray)]
+    [InlineData("Center", TaskbarPillAnchor.Tray)]   // 已废弃的档位，老配置里可能还留着
     [InlineData("乱写的", TaskbarPillAnchor.Tray)]
     public void AnchorNormalize_OnlyAcceptsKnownValues(string? input, string expected)
         => Assert.Equal(expected, TaskbarPillAnchor.Normalize(input));
@@ -278,8 +282,8 @@ public class TaskbarBatteryOptionsTests
     // T23：Normalize 与 Parse 是两处 switch，必须映射一致（漂了的表现是"设置了不生效"）
     [Theory]
     [InlineData("Left", PillAnchor.Left)]
-    [InlineData("Center", PillAnchor.Center)]
     [InlineData("Tray", PillAnchor.Tray)]
+    [InlineData("Center", PillAnchor.Tray)]
     [InlineData(null, PillAnchor.Tray)]
     [InlineData("乱写的", PillAnchor.Tray)]
     public void AnchorParse_MapsToEnum(string? input, PillAnchor expected)

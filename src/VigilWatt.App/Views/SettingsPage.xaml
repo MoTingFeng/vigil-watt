@@ -284,7 +284,6 @@
                                           VerticalAlignment="Center"
                                           SelectionChanged="TaskbarAnchor_Changed">
                                     <ComboBoxItem Content="靠左" Tag="Left" />
-                                    <ComboBoxItem Content="居中" Tag="Center" />
                                     <ComboBoxItem Content="托盘左侧" Tag="Tray" />
                                 </ComboBox>
                             </Grid>

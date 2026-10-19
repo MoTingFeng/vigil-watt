@@ -36,20 +36,24 @@ public static class TaskbarLayout
     }
 
     /// <summary>
-    /// 贴片左上角（物理像素）。默认位由 <paramref name="anchor"/> 决定（任务栏起始端 / 居中 / 托盘左侧），
+    /// 贴片左上角（物理像素）。默认位由 <paramref name="anchor"/> 决定（按钮区左侧 / 托盘左侧），
     /// 再叠加用户拖动出来的 <paramref name="offset"/>；结果夹在任务栏内，并把"实际落点"反推回
     /// <paramref name="appliedOffset"/>——这样拖到头再往回拖不会有一段"空走"。
     /// </summary>
+    /// <param name="buttonsLeft">
+    /// 任务栏按钮区（图标区）左缘。Left 锚点从这里起算，**避开最左端的天气/搜索小组件**——
+    /// 那些是独立的顶层窗口，不是任务栏子窗口，贴到最边缘必然压住它们。传 0 表示读不到，退回任务栏左缘。
+    /// </param>
     public static (int X, int Y) Place(
         PixelRect taskbar, PixelRect tray, int pillW, int pillH, PillAnchor anchor, int offset, int gapPx,
-        out int appliedOffset)
+        out int appliedOffset, int buttonsLeft = 0)
     {
         if (IsHorizontal(taskbar))
         {
             int baseX = anchor switch
             {
-                PillAnchor.Left => taskbar.Left + EdgeInsetPx,
-                PillAnchor.Center => taskbar.Left + (taskbar.Width - pillW) / 2,
+                // 按钮区左缘再留一个 EdgeInset，避免紧贴图标；读不到按钮区就退回任务栏左缘
+                PillAnchor.Left => (buttonsLeft > 0 ? buttonsLeft : taskbar.Left) + EdgeInsetPx,
                 _ => (tray.Width > 0 ? tray.Left : taskbar.Right) - pillW - gapPx,
             };
             int min = taskbar.Left + EdgeInsetPx;
@@ -59,11 +63,10 @@ public static class TaskbarLayout
             return (x, taskbar.Top + (taskbar.Height - pillH) / 2);
         }
 
-        // 竖向任务栏：锚点沿竖直方向——"起始端"就是上端
+        // 竖向任务栏：锚点沿竖直方向——"左侧"即按钮区上端
         int baseY = anchor switch
         {
-            PillAnchor.Left => taskbar.Top + EdgeInsetPx,
-            PillAnchor.Center => taskbar.Top + (taskbar.Height - pillH) / 2,
+            PillAnchor.Left => (buttonsLeft > 0 ? buttonsLeft : taskbar.Top) + EdgeInsetPx,
             _ => (tray.Height > 0 ? tray.Top : taskbar.Bottom) - pillH - gapPx,
         };
         int minY = taskbar.Top + EdgeInsetPx;

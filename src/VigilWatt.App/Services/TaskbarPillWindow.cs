@@ -51,6 +51,8 @@ public sealed class TaskbarPillWindow : IDisposable
     private int _dragStartCursor, _dragStartOffset;
     private bool _taskbarHorizontal = true;
     private PixelRect _taskbarRect, _trayRect;
+    /// <summary>任务栏按钮区左缘（横向）或上缘（竖向）。Left 锚点靠它避开最左端的天气/搜索小组件；0 = 读不到。</summary>
+    private int _buttonsLeft;
     private int _refreshQueued;
     private int _rebuildQueued;
     private bool _needRender = true;
@@ -301,9 +303,12 @@ public sealed class TaskbarPillWindow : IDisposable
             return;
         }
 
-        if (!TryGetTaskbar(out var rect, out var tray, out bool hidden)) return;
+        if (!TryGetTaskbar(out var rect, out var tray, out bool hidden, out int buttonsLeft)) return;
         // 任务栏自动隐藏时只剩约 2px 厚的边：子窗口会自己跟着父窗口走，别按 2px 重算尺寸位置
         if (hidden && _pillH > 0) return;
+
+        // 按钮区位置每次都更新：窗口打开/关闭会移动它，而 Left 锚点靠它避让左侧小组件
+        _buttonsLeft = buttonsLeft;
 
         if (rect != _taskbarRect || tray != _trayRect)
         {
@@ -323,11 +328,13 @@ public sealed class TaskbarPillWindow : IDisposable
     }
 
     /// <summary>找任务栏与托盘矩形（物理像素、屏幕坐标）；<paramref name="hidden"/> 表示自动隐藏已收起。</summary>
-    private static bool TryGetTaskbar(out PixelRect taskbar, out PixelRect tray, out bool hidden)
+    private static bool TryGetTaskbar(out PixelRect taskbar, out PixelRect tray, out bool hidden,
+        out int buttonsLeft)
     {
         taskbar = default;
         tray = default;
         hidden = false;
+        buttonsLeft = 0;
 
         var hwnd = Native.FindWindowW(Native.TaskbarClassName, null);
         if (hwnd == IntPtr.Zero || !Native.GetWindowRect(hwnd, out var rect)) return false;
@@ -343,6 +350,13 @@ public sealed class TaskbarPillWindow : IDisposable
         var trayHwnd = Native.FindWindowExW(hwnd, IntPtr.Zero, Native.TrayNotifyClassName, null);
         if (trayHwnd != IntPtr.Zero && Native.GetWindowRect(trayHwnd, out var trayRect))
             tray = new PixelRect(trayRect.Left, trayRect.Top, trayRect.Width, trayRect.Height);
+
+        // 按钮区左缘：Left 锚点靠它避开最左端的天气/搜索小组件（那些是独立顶层窗口）。
+        // 读不到就返回 0，Place 会退回任务栏左缘。
+        var rebar = Native.FindWindowExW(hwnd, IntPtr.Zero, Native.ReBarClassName, null);
+        if (rebar != IntPtr.Zero && Native.GetWindowRect(rebar, out var rebarRect))
+            buttonsLeft = TaskbarLayout.IsHorizontal(taskbar) ? rebarRect.Left : rebarRect.Top;
+
         return true;
     }
 
@@ -398,7 +412,7 @@ public sealed class TaskbarPillWindow : IDisposable
 
         int gap = (int)Math.Round(EdgeGapDip * Scale);
         int placeOffset = OffsetForCurrentDpi(out _);
-        var (x, y) = TaskbarLayout.Place(_taskbarRect, _trayRect, _pillW, _pillH, CurrentAnchor, placeOffset, gap, out int applied);
+        var (x, y) = TaskbarLayout.Place(_taskbarRect, _trayRect, _pillW, _pillH, CurrentAnchor, placeOffset, gap, out int applied, _buttonsLeft);
         // 过渡帧（拔插显示器时任务栏/托盘矩形短暂错位）也会夹紧；只有拖动中才把夹紧结果写回记忆，
         // 否则分辨率往返后用户偏移会被污染。反推写回语义见 docs/dev/runtime-pitfalls.md §16.5。
         if (_dragging) _offsetPx = applied;
@@ -564,7 +578,7 @@ public sealed class TaskbarPillWindow : IDisposable
         // 用当帧可见（已夹紧）的偏移做起点：屏幕变窄贴片贴边时，一拖不会跳回越界前的记忆值
         int gap = (int)Math.Round(EdgeGapDip * Scale);
         int placeOffset = OffsetForCurrentDpi(out uint dpi);
-        TaskbarLayout.Place(_taskbarRect, _trayRect, _pillW, _pillH, CurrentAnchor, placeOffset, gap, out int visible);
+        TaskbarLayout.Place(_taskbarRect, _trayRect, _pillW, _pillH, CurrentAnchor, placeOffset, gap, out int visible, _buttonsLeft);
         _offsetPx = visible;
         _offsetDpi = (int)dpi;
 

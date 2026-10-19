@@ -189,6 +189,9 @@ internal static class Native
     /// <summary>任务栏内的通知区域（图标 + 时钟）类名，贴片就贴在它左边。</summary>
     public const string TrayNotifyClassName = "TrayNotifyWnd";
 
+    /// <summary>任务栏按钮区（图标区）类名。Left 锚点靠它避开最左端的天气/搜索小组件。</summary>
+    public const string ReBarClassName = "ReBarWindow32";
+
     // ---- 窗口圆角（仅 Win11）----
     // ⚠ Win10 **不要**用 SetWindowRgn 裁圆角：WinUI 3 的内容走 DirectComposition，SetWindowRgn
     // 只裁传统 GDI 区域、对 DComp 内容完全无效（实测"设了区域仍是直角"）。

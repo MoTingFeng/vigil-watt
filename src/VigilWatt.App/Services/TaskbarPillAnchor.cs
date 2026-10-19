@@ -1,10 +1,9 @@
 namespace VigilWatt.App.Services;
 
-/// <summary>贴片在任务栏里的锚点：Left = 任务栏方向的起始端，Center = 居中，Tray = 紧贴系统托盘左侧。</summary>
+/// <summary>贴片在任务栏里的锚点：Left = 任务栏按钮区左侧（避开天气/搜索小组件），Tray = 紧贴系统托盘左侧。</summary>
 public enum PillAnchor
 {
     Left,
-    Center,
     Tray,
 }
 
@@ -17,15 +16,12 @@ public static class TaskbarPillAnchor
 {
     public const string Left = "Left";
 
-    public const string Center = "Center";
-
     public const string Tray = "Tray";
 
-    /// <summary>把任意输入（含 null / 手改坏了的配置）收敛成三个合法取值之一；未知按 Tray（改造前的行为）。</summary>
+    /// <summary>把任意输入（含 null / 手改坏了的配置 / 已废弃的 Center）收敛成两个合法取值之一；未知按 Tray（改造前的行为）。</summary>
     public static string Normalize(string? value) => value switch
     {
         Left => Left,
-        Center => Center,
         _ => Tray,
     };
 
@@ -33,15 +29,13 @@ public static class TaskbarPillAnchor
     public static PillAnchor Parse(string? value) => Normalize(value) switch
     {
         Left => PillAnchor.Left,
-        Center => PillAnchor.Center,
         _ => PillAnchor.Tray,
     };
 
-    /// <summary>设置页副标题用的一句话说明。竖向任务栏时"靠左"即靠上端（沿任务栏方向的起始端）。</summary>
+    /// <summary>设置页副标题用的一句话说明。</summary>
     public static string Describe(string? value) => Normalize(value) switch
     {
-        Left => "任务栏起始端（横向任务栏就是最左边，开始按钮那一侧）",
-        Center => "任务栏正中",
+        Left => "任务栏图标区的左侧，避开天气/搜索小组件（竖向任务栏则是图标区上端）",
         _ => "紧贴系统托盘左侧（默认）",
     };
 }
