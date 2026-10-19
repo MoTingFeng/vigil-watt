@@ -267,12 +267,26 @@
                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" Padding="0,12">
                                 <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                                     <TextBlock Text="任务栏电量贴片" Style="{StaticResource RowTitleStyle}" />
-                                    <TextBlock Text="在任务栏里（系统托盘左边）钉一条电量胶囊，按住可沿任务栏拖动；本机电量不参与（系统已有电池图标）"
+                                    <TextBlock Text="在任务栏里钉一条电量胶囊，位置在下方选；本机电量不参与（系统已有电池图标）"
                                                Style="{StaticResource RowDescStyle}" />
                                 </StackPanel>
                                 <ToggleSwitch Grid.Column="1" x:Name="TaskbarToggle"
                                               OnContent="开" OffContent="关"
                                               MinWidth="0" VerticalAlignment="Center" />
+                            </Grid>
+                            <Border Style="{StaticResource RowDividerStyle}" />
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" Padding="0,12">
+                                <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock Text="贴片位置" Style="{StaticResource RowTitleStyle}" />
+                                    <TextBlock x:Name="TaskbarAnchorHintText" Style="{StaticResource RowDescStyle}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="1" x:Name="TaskbarAnchorCombo" Width="180"
+                                          VerticalAlignment="Center"
+                                          SelectionChanged="TaskbarAnchor_Changed">
+                                    <ComboBoxItem Content="靠左" Tag="Left" />
+                                    <ComboBoxItem Content="居中" Tag="Center" />
+                                    <ComboBoxItem Content="托盘左侧" Tag="Tray" />
+                                </ComboBox>
                             </Grid>
                             <Border Style="{StaticResource RowDividerStyle}" />
                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" Padding="0,12">
