@@ -88,6 +88,9 @@ public sealed partial class SettingsPage : Page
 
         // 任务栏贴片：与小组件同一套路（下拉框存偏好、副标题写行为），取值收敛也只有一处定义
         TaskbarToggle.IsOn = s.TaskbarBatteryEnabled;
+        var taskbarAnchor = TaskbarPillAnchor.Normalize(s.TaskbarBatteryAnchor);
+        SelectByTag(TaskbarAnchorCombo, taskbarAnchor);
+        TaskbarAnchorHintText.Text = TaskbarPillAnchor.Describe(taskbarAnchor);
         var taskbarMode = TaskbarBatteryMode.Normalize(s.TaskbarBatteryMode);
         SelectByTag(TaskbarModeCombo, taskbarMode);
         TaskbarModeHintText.Text = TaskbarBatteryMode.Describe(taskbarMode);
@@ -138,6 +141,12 @@ public sealed partial class SettingsPage : Page
     {
         if (LogLevelCombo.SelectedItem is not ComboBoxItem item || item.Tag is not string tag) return;
         LogLevelHintText.Text = LogLevelOptions.Describe(tag);
+    }
+
+    private void TaskbarAnchor_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (TaskbarAnchorCombo.SelectedItem is not ComboBoxItem item || item.Tag is not string tag) return;
+        TaskbarAnchorHintText.Text = TaskbarPillAnchor.Describe(tag);
     }
 
     private void TaskbarMode_Changed(object sender, SelectionChangedEventArgs e)
@@ -427,6 +436,12 @@ public sealed partial class SettingsPage : Page
             ? WidgetMaxDevicesOptions.Clamp(maxValue)
             : WidgetMaxDevicesOptions.Default;
         s.TaskbarBatteryEnabled = TaskbarToggle.IsOn;
+        var newTaskbarAnchor = TaskbarPillAnchor.Normalize(
+            (TaskbarAnchorCombo.SelectedItem as ComboBoxItem)?.Tag as string);
+        // 换锚点 = 重新定位：旧偏移是相对上一个锚点算出来的，留着会把"选靠左"又推走
+        if (!string.Equals(s.TaskbarBatteryAnchor, newTaskbarAnchor, StringComparison.Ordinal))
+            s.TaskbarBatteryOffsetX = 0;
+        s.TaskbarBatteryAnchor = newTaskbarAnchor;
         s.TaskbarBatteryMode = TaskbarBatteryMode.Normalize(
             (TaskbarModeCombo.SelectedItem as ComboBoxItem)?.Tag as string);
         s.TaskbarBatteryMaxDevices = TaskbarMaxCombo.SelectedItem is ComboBoxItem taskbarMaxItem

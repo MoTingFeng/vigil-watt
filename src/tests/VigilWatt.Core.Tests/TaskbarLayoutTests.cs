@@ -50,7 +50,7 @@ public class TaskbarLayoutTests
     [Fact]
     public void Place_DefaultsToLeftOfTray()
     {
-        var (x, y) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, 0, 6, out int applied);
+        var (x, y) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Tray, 0, 6, out int applied);
 
         Assert.Equal(1700 - 200 - 6, x);          // 1494
         Assert.Equal(1032 + (48 - 36) / 2, y);    // 1038
@@ -61,7 +61,7 @@ public class TaskbarLayoutTests
     [Fact]
     public void Place_FallsBackToTaskbarRightEdge()
     {
-        var (x, _) = TaskbarLayout.Place(BottomTaskbar, default, 200, 36, 0, 6, out _);
+        var (x, _) = TaskbarLayout.Place(BottomTaskbar, default, 200, 36, PillAnchor.Tray, 0, 6, out _);
         Assert.Equal(1920 - 200 - 6, x);
     }
 
@@ -69,7 +69,7 @@ public class TaskbarLayoutTests
     [Fact]
     public void Place_ClampsAtRightAndBackDerivesOffset()
     {
-        var (x, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, 5000, 6, out int applied);
+        var (x, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Tray, 5000, 6, out int applied);
 
         Assert.Equal(1920 - 200 - TaskbarLayout.EdgeInsetPx, x);
         Assert.Equal(x - (1700 - 200 - 6), applied);
@@ -79,7 +79,7 @@ public class TaskbarLayoutTests
     [Fact]
     public void Place_ClampsAtLeftAndBackDerivesOffset()
     {
-        var (x, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, -5000, 6, out int applied);
+        var (x, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Tray, -5000, 6, out int applied);
 
         Assert.Equal(TaskbarLayout.EdgeInsetPx, x);
         Assert.Equal(x - (1700 - 200 - 6), applied);
@@ -92,7 +92,7 @@ public class TaskbarLayoutTests
         var taskbar = new PixelRect(0, 0, 48, 1080);
         var tray = new PixelRect(0, 860, 48, 220);
 
-        var (x, y) = TaskbarLayout.Place(taskbar, tray, 200, 36, 0, 6, out _);
+        var (x, y) = TaskbarLayout.Place(taskbar, tray, 200, 36, PillAnchor.Tray, 0, 6, out _);
 
         Assert.Equal(0, x);                     // 左停靠 → 从任务栏左缘往右伸，不会跑到屏幕外
         Assert.Equal(860 - 36 - 6, y);
@@ -104,7 +104,7 @@ public class TaskbarLayoutTests
     {
         var taskbar = new PixelRect(1872, 0, 48, 1080);
 
-        var (x, _) = TaskbarLayout.Place(taskbar, default, 200, 36, 0, 6, out _);
+        var (x, _) = TaskbarLayout.Place(taskbar, default, 200, 36, PillAnchor.Tray, 0, 6, out _);
 
         Assert.Equal(1872 + 48 - 200, x);
     }
@@ -182,6 +182,52 @@ public class TaskbarLayoutTests
         var (rx, _) = TaskbarLayout.PlaceTooltip(rightBar, rightChip, 120, 28, 4, work);
         Assert.Equal(1720 - 120 - 4, rx);
     }
+
+    // T18：锚点 = 任务栏起始端（横向就是最左边，开始按钮那一侧）
+    [Fact]
+    public void Place_AnchorLeft_SitsAtTaskbarStart()
+    {
+        var (x, y) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Left, 0, 6, out int applied);
+
+        Assert.Equal(TaskbarLayout.EdgeInsetPx, x);
+        Assert.Equal(1032 + (48 - 36) / 2, y);
+        Assert.Equal(0, applied);
+    }
+
+    // T19：锚点 = 居中
+    [Fact]
+    public void Place_AnchorCenter_SitsInTaskbarMiddle()
+    {
+        var (x, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Center, 0, 6, out int applied);
+
+        Assert.Equal((1920 - 200) / 2, x);
+        Assert.Equal(0, applied);
+    }
+
+    // T20：锚点之上仍叠加拖动偏移；撞到起始端被夹住并把落点反推
+    [Fact]
+    public void Place_AnchorLeft_OffsetStillAppliesAndClamps()
+    {
+        var (x, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Left, 300, 6, out int applied);
+        Assert.Equal(TaskbarLayout.EdgeInsetPx + 300, x);
+        Assert.Equal(300, applied);
+
+        var (cx, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, PillAnchor.Left, -5000, 6, out int clamped);
+        Assert.Equal(TaskbarLayout.EdgeInsetPx, cx);
+        Assert.Equal(0, clamped);
+    }
+
+    // T21：竖向任务栏的锚点沿竖直方向（"起始端"= 上端）
+    [Fact]
+    public void Place_VerticalAnchors_AlongVerticalAxis()
+    {
+        var taskbar = new PixelRect(0, 0, 48, 1080);
+        var (_, top) = TaskbarLayout.Place(taskbar, default, 40, 36, PillAnchor.Left, 0, 6, out _);
+        Assert.Equal(TaskbarLayout.EdgeInsetPx, top);
+
+        var (_, mid) = TaskbarLayout.Place(taskbar, default, 40, 36, PillAnchor.Center, 0, 6, out _);
+        Assert.Equal((1080 - 36) / 2, mid);
+    }
 }
 
 /// <summary>任务栏贴片的两个设置项收敛（T10–T12）：手改坏了的 settings.json 不能把界面带崩。</summary>
@@ -216,4 +262,26 @@ public class TaskbarBatteryOptionsTests
         Assert.All(TaskbarBatteryOptions.Choices,
             n => Assert.Equal(n, TaskbarBatteryOptions.Clamp(n)));
     }
+
+    // T22：位置锚点只认三个合法值，其余（含 null / 手改的乱值）一律按 Tray（改造前的行为）
+    [Theory]
+    [InlineData(null, TaskbarPillAnchor.Tray)]
+    [InlineData("", TaskbarPillAnchor.Tray)]
+    [InlineData("Left", TaskbarPillAnchor.Left)]
+    [InlineData("Center", TaskbarPillAnchor.Center)]
+    [InlineData("Tray", TaskbarPillAnchor.Tray)]
+    [InlineData("left", TaskbarPillAnchor.Tray)]
+    [InlineData("乱写的", TaskbarPillAnchor.Tray)]
+    public void AnchorNormalize_OnlyAcceptsKnownValues(string? input, string expected)
+        => Assert.Equal(expected, TaskbarPillAnchor.Normalize(input));
+
+    // T23：Normalize 与 Parse 是两处 switch，必须映射一致（漂了的表现是"设置了不生效"）
+    [Theory]
+    [InlineData("Left", PillAnchor.Left)]
+    [InlineData("Center", PillAnchor.Center)]
+    [InlineData("Tray", PillAnchor.Tray)]
+    [InlineData(null, PillAnchor.Tray)]
+    [InlineData("乱写的", PillAnchor.Tray)]
+    public void AnchorParse_MapsToEnum(string? input, PillAnchor expected)
+        => Assert.Equal(expected, TaskbarPillAnchor.Parse(input));
 }

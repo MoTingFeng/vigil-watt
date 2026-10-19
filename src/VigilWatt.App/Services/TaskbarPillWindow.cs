@@ -398,7 +398,7 @@ public sealed class TaskbarPillWindow : IDisposable
 
         int gap = (int)Math.Round(EdgeGapDip * Scale);
         int placeOffset = OffsetForCurrentDpi(out _);
-        var (x, y) = TaskbarLayout.Place(_taskbarRect, _trayRect, _pillW, _pillH, placeOffset, gap, out int applied);
+        var (x, y) = TaskbarLayout.Place(_taskbarRect, _trayRect, _pillW, _pillH, CurrentAnchor, placeOffset, gap, out int applied);
         // 过渡帧（拔插显示器时任务栏/托盘矩形短暂错位）也会夹紧；只有拖动中才把夹紧结果写回记忆，
         // 否则分辨率往返后用户偏移会被污染。反推写回语义见 docs/dev/runtime-pitfalls.md §16.5。
         if (_dragging) _offsetPx = applied;
@@ -422,6 +422,10 @@ public sealed class TaskbarPillWindow : IDisposable
         if (_dragging) return _offsetPx;
         return TaskbarLayout.ScaleOffset(_offsetPx, (uint)_offsetDpi, currentDpi);
     }
+
+    /// <summary>贴片锚点：任务栏起始端 / 居中 / 托盘左侧（配置坏了按 Tray）。</summary>
+    private static PillAnchor CurrentAnchor =>
+        TaskbarPillAnchor.Parse(App.Services.Settings.TaskbarBatteryAnchor);
 
     // ---------- 位图提交 ----------
 
@@ -560,7 +564,7 @@ public sealed class TaskbarPillWindow : IDisposable
         // 用当帧可见（已夹紧）的偏移做起点：屏幕变窄贴片贴边时，一拖不会跳回越界前的记忆值
         int gap = (int)Math.Round(EdgeGapDip * Scale);
         int placeOffset = OffsetForCurrentDpi(out uint dpi);
-        TaskbarLayout.Place(_taskbarRect, _trayRect, _pillW, _pillH, placeOffset, gap, out int visible);
+        TaskbarLayout.Place(_taskbarRect, _trayRect, _pillW, _pillH, CurrentAnchor, placeOffset, gap, out int visible);
         _offsetPx = visible;
         _offsetDpi = (int)dpi;
 

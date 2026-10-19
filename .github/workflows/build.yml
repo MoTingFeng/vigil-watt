@@ -1,0 +1,38 @@
+# fork 专属：上游没有 CI。本文件只放在 fork 的 main 上，
+# 通过「fork 内部 PR（feat 分支 → main）」触发，用来验证编译与单测是否通过。
+# 目的单一：让上游 PR 的 diff 里不出现这个文件。
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 .NET 8 SDK（项目要求，runner 默认不是 8）
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 构建（验收标准：0 警告 0 错误）
+        run: dotnet build VigilWatt.sln -c Debug
+
+      - name: 单测
+        run: dotnet test src/tests/VigilWatt.Core.Tests -c Debug
+
+      # 产物已是自包含非打包部署（WindowsAppSDKSelfContained），下载解压即可直接跑 VigilWatt.exe。
+      # 路径取自 AGENTS.md §4 的运行说明；路径写错时 if-no-files-found 会让本步失败，而不是静默无产物。
+      - name: 上传可运行产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: VigilWatt-Debug-win-x64
+          path: src/VigilWatt.App/bin/x64/Debug/net8.0-windows10.0.19041.0/win-x64/
+          if-no-files-found: error

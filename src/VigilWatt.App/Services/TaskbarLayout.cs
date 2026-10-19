@@ -36,28 +36,40 @@ public static class TaskbarLayout
     }
 
     /// <summary>
-    /// 贴片左上角（物理像素）。默认位 = 紧贴托盘左边（竖向任务栏则是托盘上边），再叠加用户拖动出来的
-    /// <paramref name="offset"/>；结果夹在任务栏内，并把"实际落点"反推回 <paramref name="appliedOffset"/>——
-    /// 这样拖到头再往回拖不会有一段"空走"。
+    /// 贴片左上角（物理像素）。默认位由 <paramref name="anchor"/> 决定（任务栏起始端 / 居中 / 托盘左侧），
+    /// 再叠加用户拖动出来的 <paramref name="offset"/>；结果夹在任务栏内，并把"实际落点"反推回
+    /// <paramref name="appliedOffset"/>——这样拖到头再往回拖不会有一段"空走"。
     /// </summary>
     public static (int X, int Y) Place(
-        PixelRect taskbar, PixelRect tray, int pillW, int pillH, int offset, int gapPx, out int appliedOffset)
+        PixelRect taskbar, PixelRect tray, int pillW, int pillH, PillAnchor anchor, int offset, int gapPx,
+        out int appliedOffset)
     {
         if (IsHorizontal(taskbar))
         {
-            int anchor = (tray.Width > 0 ? tray.Left : taskbar.Right) - pillW - gapPx;
+            int baseX = anchor switch
+            {
+                PillAnchor.Left => taskbar.Left + EdgeInsetPx,
+                PillAnchor.Center => taskbar.Left + (taskbar.Width - pillW) / 2,
+                _ => (tray.Width > 0 ? tray.Left : taskbar.Right) - pillW - gapPx,
+            };
             int min = taskbar.Left + EdgeInsetPx;
             int max = Math.Max(min, taskbar.Right - pillW - EdgeInsetPx);
-            int x = Math.Clamp(anchor + offset, min, max);
-            appliedOffset = x - anchor;
+            int x = Math.Clamp(baseX + offset, min, max);
+            appliedOffset = x - baseX;
             return (x, taskbar.Top + (taskbar.Height - pillH) / 2);
         }
 
-        int anchorY = (tray.Height > 0 ? tray.Top : taskbar.Bottom) - pillH - gapPx;
+        // 竖向任务栏：锚点沿竖直方向——"起始端"就是上端
+        int baseY = anchor switch
+        {
+            PillAnchor.Left => taskbar.Top + EdgeInsetPx,
+            PillAnchor.Center => taskbar.Top + (taskbar.Height - pillH) / 2,
+            _ => (tray.Height > 0 ? tray.Top : taskbar.Bottom) - pillH - gapPx,
+        };
         int minY = taskbar.Top + EdgeInsetPx;
         int maxY = Math.Max(minY, taskbar.Bottom - pillH - EdgeInsetPx);
-        int y = Math.Clamp(anchorY + offset, minY, maxY);
-        appliedOffset = y - anchorY;
+        int y = Math.Clamp(baseY + offset, minY, maxY);
+        appliedOffset = y - baseY;
 
         int centeredX = taskbar.Left + (taskbar.Width - pillW) / 2;
         if (pillW > taskbar.Width)
