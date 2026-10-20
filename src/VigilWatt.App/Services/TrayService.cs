@@ -285,6 +285,8 @@ public sealed class TrayService : IDisposable
         window.AppWindow.Show();
         window.Activate();
         Native.SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(window));
+        // 排障：贴片拖不动就是从这个动作开始的，必须能看到贴片窗口当时的状态
+        Log.Info($"主窗口已激活；贴片状态 {App.Services.TaskbarBattery?.Diagnose() ?? "未启用"}");
     }
 
     private static void Exit()

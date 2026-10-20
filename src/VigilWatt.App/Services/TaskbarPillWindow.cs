@@ -49,6 +49,8 @@ public sealed class TaskbarPillWindow : IDisposable
     private uint _windowDpi;
     private bool _dragging;
     private int _dragStartCursor, _dragStartOffset;
+    /// <summary>本次拖动是否已记过"拖动中"埋点（只记一次，避免每帧刷屏）。</summary>
+    private bool _dragMoveLogged;
     private bool _taskbarHorizontal = true;
     private PixelRect _taskbarRect, _trayRect;
     private int _refreshQueued;
@@ -148,7 +150,14 @@ public sealed class TaskbarPillWindow : IDisposable
     private void EnsureWindow()
     {
         if (_hwnd != IntPtr.Zero && Native.IsWindow(_hwnd)) return;
+        long staleHwnd = _hwnd.ToInt64();
         ReleaseWindow();
+        // ReleaseWindow 把 _pillH 清零，而 _pillH 只在"矩形变了"时才重算。
+        // 不同步清掉矩形的话重建后 rect 与旧值相等 → _pillH 永远停在 0 → Render 首行直接返回
+        // → _pillW 保持 0 → ApplyPosition 也返回 → 窗口停在 1×1，看得见却点不到（拖不动）。
+        _taskbarRect = default;
+        _trayRect = default;
+        Log.Info($"任务栏贴片：窗口重建（旧句柄 0x{staleHwnd:X} 已失效）");
 
         RegisterClassOnce();
         var hInstance = Native.GetModuleHandleW(null);
@@ -223,9 +232,17 @@ public sealed class TaskbarPillWindow : IDisposable
         if (_taskbar == IntPtr.Zero || _hwnd == IntPtr.Zero) return;
 
         Native.SetParent(_hwnd, _taskbar);
-        var style = Native.GetWindowLongPtr(_hwnd, Native.GWL_STYLE).ToInt64();
-        style = (style & ~(long)Native.WS_POPUP) | (long)Native.WS_CHILD;
-        Native.SetWindowLongPtr(_hwnd, Native.GWL_STYLE, new IntPtr(style));
+        long before = Native.GetWindowLongPtr(_hwnd, Native.GWL_STYLE).ToInt64();
+        long after = (before & ~(long)Native.WS_POPUP) | (long)Native.WS_CHILD;
+        Native.SetWindowLongPtr(_hwnd, Native.GWL_STYLE, new IntPtr(after));
+        // MSDN：改 GWL_STYLE 后必须 SetWindowPos 才让改动生效（缓存的样式不会自动刷新）。
+        // 不加这步，窗口可能仍是 WS_POPUP 语义 → 坐标/裁剪/命中测试都可能不对。
+        Native.SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, 0, 0,
+            Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOZORDER
+            | Native.SWP_NOACTIVATE | Native.SWP_FRAMECHANGED);
+
+        Log.Info($"任务栏贴片：已挂入任务栏（taskbar=0x{_taskbar:X} style 0x{before:X}→0x{after:X} " +
+                 $"parent=0x{Native.GetParent(_hwnd).ToInt64():X}）");
     }
 
     /// <summary>DPI/显示配置变了要 Destroy+重建；不能在 WndProc 里 DestroyWindow（§16.8）。</summary>
@@ -348,9 +365,17 @@ public sealed class TaskbarPillWindow : IDisposable
 
     private void Render()
     {
-        if (_pillH <= 0) return;   // 还没算出任务栏厚度，等下一拍
+        if (_pillH <= 0)
+        {
+            // 排障：这条一旦持续出现，贴片就永远停在 1×1（看得见却点不到），
+            // 根因通常是窗口重建后 _taskbarRect 没清、_pillH 没能重算。
+            Log.Once(LogLevel.Info, "taskbar-pill-render-skip",
+                $"贴片渲染被跳过：_pillH={_pillH}（_pillW={_pillW} rect={_taskbarRect}）");
+            return;
+        }
 
         var devices = SelectDevices(out var overflowNames);
+        Log.ResetOnce("taskbar-pill-render-skip");
         var bmp = TaskbarPillRenderer.Render(
             devices, overflowNames,
             devices.ToDictionary(d => d.Id, d => App.Services.Manager.GetRemainingTimeEstimate(d)),
@@ -565,10 +590,16 @@ public sealed class TaskbarPillWindow : IDisposable
         _offsetDpi = (int)dpi;
 
         _dragging = true;
-        Native.SetCapture(_hwnd);
+        IntPtr prevCapture = Native.SetCapture(_hwnd);
         var p = Native.GetCursorPos();
         _dragStartCursor = _taskbarHorizontal ? p.X : p.Y;
         _dragStartOffset = visible;
+
+        // 排障埋点：拖动失败时靠这几行区分"消息没到 / capture 没拿到 / 状态是坏的"
+        Log.Info($"贴片按下: hwnd=0x{_hwnd:X} pill={_pillW}x{_pillH} rect={_taskbarRect} " +
+                 $"offset={_offsetPx} offsetDpi={_offsetDpi} dpi={dpi} 任务栏dpi={TaskbarDpi()} " +
+                 $"horizontal={_taskbarHorizontal} cursor={_dragStartCursor} " +
+                 $"SetCapture={prevCapture.ToInt64():X} captureNow={Native.GetCapture().ToInt64():X}");
     }
 
     private void OnMouseMove(IntPtr lParam)
@@ -577,8 +608,16 @@ public sealed class TaskbarPillWindow : IDisposable
         {
             var p = Native.GetCursorPos();
             // 只沿任务栏方向拖：横向任务栏走 X，竖向走 Y（斜着拖不会把贴片拽离任务栏）
-            _offsetPx = _dragStartOffset + ((_taskbarHorizontal ? p.X : p.Y) - _dragStartCursor);
+            int cursor = _taskbarHorizontal ? p.X : p.Y;
+            _offsetPx = _dragStartOffset + (cursor - _dragStartCursor);
             ApplyPosition();
+            // 拖动中每帧都记会刷屏：只在起点位移超过 40px 时记一次（够判断"消息有没有在来"）
+            if (Math.Abs(cursor - _dragStartCursor) >= 40 && !_dragMoveLogged)
+            {
+                _dragMoveLogged = true;
+                Log.Info($"贴片拖动中: cursor={cursor} 起点={_dragStartCursor} offset={_offsetPx} " +
+                         $"captureNow={Native.GetCapture().ToInt64():X} hwnd=0x{_hwnd:X}");
+            }
             return;
         }
 
@@ -787,6 +826,19 @@ public sealed class TaskbarPillWindow : IDisposable
         return new PixelRect(r.Left, r.Top, r.Width, r.Height);
     }
 
+    /// <summary>排障快照：贴片窗口是否还挂在任务栏上、尺寸是否正常（决定"能否被点到"）。</summary>
+    public string Diagnose()
+    {
+        if (_hwnd == IntPtr.Zero) return "无窗口";
+        long parent = Native.GetParent(_hwnd).ToInt64();
+        long style = Native.GetWindowLongPtr(_hwnd, Native.GWL_STYLE).ToInt64();
+        bool child = (style & Native.WS_CHILD) != 0;
+        bool popup = (style & Native.WS_POPUP) != 0;
+        return $"hwnd=0x{_hwnd.ToInt64():X} parent=0x{parent:X} " +
+               $"isWindow={Native.IsWindow(_hwnd)} pill={_pillW}x{_pillH} " +
+               $"child={child} popup={popup} dragging={_dragging}";
+    }
+
     private void HideTip()
     {
         if (_tipHwnd != IntPtr.Zero && Native.IsWindow(_tipHwnd))
@@ -801,10 +853,17 @@ public sealed class TaskbarPillWindow : IDisposable
         _dragging = false;
         Native.ReleaseCapture();
 
+        Log.Info($"贴片松开: offset={_offsetPx} offsetDpi={_offsetDpi} " +
+                 $"cursor={(_taskbarHorizontal ? Native.GetCursorPos().X : Native.GetCursorPos().Y)} " +
+                 $"起点={_dragStartCursor} 位移={_offsetPx - _dragStartOffset} " +
+                 $"已记拖动中={_dragMoveLogged}");
+        _dragMoveLogged = false;
+
         var s = App.Services.Settings;
         s.TaskbarBatteryOffsetX = _offsetPx;
         s.TaskbarBatteryOffsetDpi = _offsetDpi;
         s.Save();
+        Log.Info($"贴片位置已保存: TaskbarBatteryOffsetX={_offsetPx} Dpi={_offsetDpi}");
     }
 
     private void OnDoubleClick()

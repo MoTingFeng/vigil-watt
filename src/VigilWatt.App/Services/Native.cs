@@ -429,6 +429,10 @@ internal static class Native
     [DllImport("user32.dll")]
     public static extern IntPtr SetCapture(IntPtr hwnd);
 
+    /// <summary>当前线程的捕获窗口（排障用：确认 SetCapture 是否真的生效）。</summary>
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetCapture();
+
     [DllImport("user32.dll")]
     public static extern bool ReleaseCapture();
 
