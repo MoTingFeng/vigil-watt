@@ -457,6 +457,10 @@ internal static class Native
     [DllImport("user32.dll")]
     public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 
+    /// <summary>系统双击判定时限（毫秒）。贴片靠它区分"连拖"与"双击开窗"。</summary>
+    [DllImport("user32.dll")]
+    public static extern uint GetDoubleClickTime();
+
     public const uint GA_ROOT = 2;
 
     /// <summary>窗口所在显示器的 DPI。贴片按任务栏的 DPI 换算尺寸，不用自己的（子窗口的 DPI 跟父窗口）。</summary>

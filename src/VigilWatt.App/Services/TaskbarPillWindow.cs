@@ -58,6 +58,9 @@ public sealed class TaskbarPillWindow : IDisposable
     private string _lastInputSnapshot = "";
     /// <summary>本秒内 WndProc 收到的鼠标移动/按下次数（诊断用，每次体检后清零）。</summary>
     private int _dbgMoveCount, _dbgDownCount;
+    /// <summary>上次点击时刻 / 上次点击是否产生了位移（判定"连拖"与"双击"用）。</summary>
+    private DateTime _lastClickAt;
+    private bool _lastClickWasDrag;
     /// <summary>上次心跳时刻（诊断用，证明 Update 仍在跑）。</summary>
     private DateTime _lastHeartbeatAt = DateTime.UtcNow;
     private bool _taskbarHorizontal = true;
@@ -633,6 +636,9 @@ public sealed class TaskbarPillWindow : IDisposable
         if (msg == Native.WM_LBUTTONDOWN)
             Log.Info($"[WndProc] 收到 WM_LBUTTONDOWN hwnd=0x{hwnd.ToInt64():X} " +
                      $"_current={(_current != null ? "有" : "空")}");
+        if (msg == Native.WM_LBUTTONDBLCLK)
+            Log.Info($"[WndProc] 收到 WM_LBUTTONDBLCLK hwnd=0x{hwnd.ToInt64():X} " +
+                     $"_current={(_current != null ? "有" : "空")}");
 
         var self = _current;
         if (self != null)
@@ -953,10 +959,16 @@ public sealed class TaskbarPillWindow : IDisposable
         _dragging = false;
         Native.ReleaseCapture();
 
+        int moved = _offsetPx - _dragStartOffset;
+        // 记下这一击是不是"拖动"：双击里第二次按下会先收到 WM_LBUTTONDBLCLK，
+        // 若上一次点击其实是拖动（用户在做连续拖动），那次双击不能当成"打开主窗口"。
+        _lastClickWasDrag = Math.Abs(moved) > 2;
+        _lastClickAt = DateTime.UtcNow;
+
         Log.Info($"贴片松开: offset={_offsetPx} offsetDpi={_offsetDpi} " +
                  $"cursor={(_taskbarHorizontal ? Native.GetCursorPos().X : Native.GetCursorPos().Y)} " +
-                 $"起点={_dragStartCursor} 位移={_offsetPx - _dragStartOffset} " +
-                 $"已记拖动中={_dragMoveLogged}");
+                 $"起点={_dragStartCursor} 位移={moved} " +
+                 $"已记拖动中={_dragMoveLogged} 本次算拖动={_lastClickWasDrag}");
         _dragMoveLogged = false;
 
         var s = App.Services.Settings;
@@ -968,7 +980,17 @@ public sealed class TaskbarPillWindow : IDisposable
 
     private void OnDoubleClick()
     {
+        // Windows 的双击判定不看第一次点击有没有移动：连续两次拖动会被判成双击。
+        // 贴片的主要交互就是拖动，所以"上一次是拖动"时不抢焦点开窗，只结束当前拖动。
+        var sinceLast = (DateTime.UtcNow - _lastClickAt).TotalMilliseconds;
+        uint doubleClickMs = Native.GetDoubleClickTime();
+        bool draggingIntended = _lastClickWasDrag && sinceLast < doubleClickMs;
+        Log.Info($"贴片双击: _dragging={_dragging} 上次是拖动={_lastClickWasDrag} " +
+                 $"距上次点击={sinceLast:0}ms 双击时限={doubleClickMs}ms " +
+                 $"→ {(draggingIntended ? "忽略（视为连续拖动）" : "打开主窗口")}");
+
         if (_dragging) OnLButtonUp();
+        if (draggingIntended) return;
         TrayService.ShowMainWindow();
     }
 
