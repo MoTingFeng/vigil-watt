@@ -67,6 +67,8 @@ public sealed class MchosePlugin : BatteryPluginBase
         if (info.VendorId == Betop.BetopPlugin.BetopVid) return false;
         // 英菲克接收器也暴露 64 字节 vendor 输出接口；避免误发迈从会话/查询帧
         if (info.VendorId == Inphic.InphicPlugin.InphicVid) return false;
+        // VGN 键盘的电量通道（0xFF1C/0x0092）同为双向 64 字节厂商通道，会命中下面的 64/64 分支
+        if (info.VendorId == Vgn.VgnPlugin.VgnVid) return false;
         // consumer/system/标准键盘接口即使产品名含 MCHOSE 也不是配置通道，必须是 vendor 用法 + ≥20/20 的 I/O
         bool vendor = info.UsagePage >= 0xFF00 || info.Usage >= 0xFF00;
         if (!vendor) return false;
