@@ -51,6 +51,15 @@ public sealed class TaskbarPillWindow : IDisposable
     private int _dragStartCursor, _dragStartOffset;
     /// <summary>本次拖动是否已记过"拖动中"埋点（只记一次，避免每帧刷屏）。</summary>
     private bool _dragMoveLogged;
+    /// <summary>贴片当前屏幕坐标（物理像素），输入诊断用来算中心点。</summary>
+    private int _pillScreenX, _pillScreenY;
+    /// <summary>上一次输入体检是否异常 / 上一次快照串，用于只在变化时写日志。</summary>
+    private bool _lastInputBad;
+    private string _lastInputSnapshot = "";
+    /// <summary>本秒内 WndProc 收到的鼠标移动/按下次数（诊断用，每次体检后清零）。</summary>
+    private int _dbgMoveCount, _dbgDownCount;
+    /// <summary>上次心跳时刻（诊断用，证明 Update 仍在跑）。</summary>
+    private DateTime _lastHeartbeatAt = DateTime.UtcNow;
     private bool _taskbarHorizontal = true;
     private PixelRect _taskbarRect, _trayRect;
     private int _refreshQueued;
@@ -337,6 +346,7 @@ public sealed class TaskbarPillWindow : IDisposable
 
         if (_needRender || _bitmap == null) Render();
         ApplyPosition();
+        DiagnoseInput();
     }
 
     /// <summary>找任务栏与托盘矩形（物理像素、屏幕坐标）；<paramref name="hidden"/> 表示自动隐藏已收起。</summary>
@@ -429,9 +439,66 @@ public sealed class TaskbarPillWindow : IDisposable
         if (_dragging) _offsetPx = applied;
 
         // 子窗口的坐标是**相对父窗口客户区**的，定位数学算出来的是屏幕坐标，这里换算一次
+        _pillScreenX = x;
+        _pillScreenY = y;
         var pt = new Native.POINT { X = x, Y = y };
         Native.ScreenToClient(_taskbar, ref pt);
         Upload(pt.X, pt.Y);
+    }
+
+    /// <summary>
+    /// 输入通道体检（每秒一次，只在状态变化时记日志）。
+    /// 贴片"可见但点不动"只可能是三件事：被别的窗口抢了鼠标捕获 / 窗口被禁用 / 贴片位置被别的窗口盖住。
+    /// 这三条都能在进程内直接问系统，比从外面猜可靠。
+    /// </summary>
+    private void DiagnoseInput()
+    {
+        if (_hwnd == IntPtr.Zero || _pillW == 0 || _pillH == 0) return;
+
+        long self = _hwnd.ToInt64();
+        long capture = Native.GetCapture().ToInt64();
+        bool enabled = Native.IsWindowEnabled(_hwnd);
+        bool visible = Native.IsWindowVisible(_hwnd);
+
+        // 贴片中心点上"系统认为"属于哪个窗口：不是自己就说明被覆盖了
+        var center = new Native.POINT
+        {
+            X = _pillScreenX + _pillW / 2,
+            Y = _pillScreenY + _pillH / 2,
+        };
+        long underPoint = Native.WindowFromPoint(center).ToInt64();
+        long underCenter = Native.GetAncestor(underPoint, Native.GA_ROOT).ToInt64();
+
+        // capture 被别的窗口持有时，鼠标消息整个线程都收不到 → 这是"点了没反应"的头号嫌疑
+        bool captureStolen = capture != 0 && capture != self;
+        bool covered = underPoint != 0 && underPoint != self && underCenter != self;
+        bool bad = captureStolen || !enabled || !visible || covered;
+
+        // 计数放进日志但不进 snapshot：它每秒都在变，放进去会让"状态未变"永远判成变了 → 每秒刷屏
+        string counts = $"本秒收到 move={_dbgMoveCount} down={_dbgDownCount}";
+        _dbgMoveCount = 0;
+        _dbgDownCount = 0;
+        string snapshot = $"captureStolen={captureStolen}(cap=0x{capture:X}) enabled={enabled} " +
+                          $"visible={visible} covered={covered}(under=0x{underCenter:X})";
+
+        if (bad != _lastInputBad || snapshot != _lastInputSnapshot)
+        {
+            _lastInputBad = bad;
+            _lastInputSnapshot = snapshot;
+            if (bad)
+                Log.Warn($"贴片输入异常: {snapshot} {counts} 贴片位置=({_pillScreenX},{_pillScreenY} {_pillW}x{_pillH}) " +
+                         $"父窗口=0x{Native.GetParent(_hwnd).ToInt64():X}");
+            else
+                Log.Info($"贴片输入恢复: {snapshot} {counts}");
+        }
+
+        // 心跳：Update 停了（DispatcherQueue 被堵）也会表现为"点不动"，必须能和"消息没到"区分开
+        var now = DateTime.UtcNow;
+        if ((now - _lastHeartbeatAt).TotalSeconds >= 60)
+        {
+            _lastHeartbeatAt = now;
+            Log.Info($"贴片心跳: {snapshot} {counts}");
+        }
     }
 
     /// <summary>把记下的偏移换算成当前任务栏 DPI 下的物理像素；旧配置 Dpi=0 时首次只绑定、不改像素。</summary>
@@ -536,9 +603,17 @@ public sealed class TaskbarPillWindow : IDisposable
 
     private static IntPtr WndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
+        // 诊断用：_current 为 null 时下面整段 switch 会被静默跳过（消息到了也没反应）。
+        // 这行只在按下时记，正好用来区分"消息没到窗口"和"到了但被丢了"。
+        if (msg == Native.WM_LBUTTONDOWN)
+            Log.Info($"[WndProc] 收到 WM_LBUTTONDOWN hwnd=0x{hwnd.ToInt64():X} " +
+                     $"_current={(_current != null ? "有" : "空")}");
+
         var self = _current;
         if (self != null)
         {
+            if (msg == Native.WM_MOUSEMOVE) self._dbgMoveCount++;
+            if (msg == Native.WM_LBUTTONDOWN) self._dbgDownCount++;
             switch (msg)
             {
                 case Native.WM_LBUTTONDOWN:

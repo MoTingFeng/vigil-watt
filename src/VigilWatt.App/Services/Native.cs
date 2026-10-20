@@ -442,6 +442,23 @@ internal static class Native
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool DestroyWindow(IntPtr hwnd);
 
+    /// <summary>窗口是否被 EnableWindow(FALSE) 禁用（禁用后收不到鼠标消息，但依然可见）。</summary>
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowEnabled(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hwnd);
+
+    /// <summary>屏幕坐标点上最顶层的窗口（排障：确认贴片位置有没有被别的窗口盖住）。</summary>
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT point);
+
+    /// <summary>取窗口祖先。GA_ROOT = 2（取顶层窗口）。</summary>
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
+    public const uint GA_ROOT = 2;
+
     /// <summary>窗口所在显示器的 DPI。贴片按任务栏的 DPI 换算尺寸，不用自己的（子窗口的 DPI 跟父窗口）。</summary>
     [DllImport("user32.dll")]
     public static extern uint GetDpiForWindow(IntPtr hwnd);
