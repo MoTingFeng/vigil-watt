@@ -466,8 +466,9 @@ public sealed class TaskbarPillWindow : IDisposable
             X = _pillScreenX + _pillW / 2,
             Y = _pillScreenY + _pillH / 2,
         };
-        long underPoint = Native.WindowFromPoint(center).ToInt64();
-        long underCenter = Native.GetAncestor(underPoint, Native.GA_ROOT).ToInt64();
+        var underHwnd = Native.WindowFromPoint(center);
+        long underPoint = underHwnd.ToInt64();
+        long underCenter = Native.GetAncestor(underHwnd, Native.GA_ROOT).ToInt64();
 
         // capture 被别的窗口持有时，鼠标消息整个线程都收不到 → 这是"点了没反应"的头号嫌疑
         bool captureStolen = capture != 0 && capture != self;
