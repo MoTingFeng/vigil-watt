@@ -444,6 +444,7 @@ public sealed class TaskbarPillWindow : IDisposable
         var pt = new Native.POINT { X = x, Y = y };
         Native.ScreenToClient(_taskbar, ref pt);
         Upload(pt.X, pt.Y);
+        VerifyPlacement(x, y);
     }
 
     /// <summary>
@@ -493,13 +494,36 @@ public sealed class TaskbarPillWindow : IDisposable
                 Log.Info($"贴片输入恢复: {snapshot} {counts}");
         }
 
-        // 心跳：Update 停了（DispatcherQueue 被堵）也会表现为"点不动"，必须能和"消息没到"区分开
+        // 心跳：Update 停了（DispatcherQueue 被堵）也会表现为"点不动"，必须能和"消息没到"区分开。
+        // 15 秒一次：主窗口打开后的失效通常在几秒内就能观察到，60 秒太慢。
         var now = DateTime.UtcNow;
-        if ((now - _lastHeartbeatAt).TotalSeconds >= 60)
+        if ((now - _lastHeartbeatAt).TotalSeconds >= 15)
         {
             _lastHeartbeatAt = now;
-            Log.Info($"贴片心跳: {snapshot} {counts}");
+            Log.Info($"贴片心跳: {snapshot} {counts} 位置=({_pillScreenX},{_pillScreenY} {_pillW}x{_pillH})");
         }
+    }
+
+    /// <summary>
+    /// 位置校验：UpdateLayeredWindow 返回成功不代表窗口真的动了。
+    /// 日志里"offset 变了"只是内部变量，用户看到的才是真相 —— 对不上就记一条。
+    /// </summary>
+    private void VerifyPlacement(int expectX, int expectY)
+    {
+        if (_hwnd == IntPtr.Zero) return;
+        if (!Native.GetWindowRect(_hwnd, out var actual)) return;
+
+        bool ok = Math.Abs(actual.Left - expectX) <= 2 && Math.Abs(actual.Top - expectY) <= 2;
+        if (ok)
+        {
+            Log.ResetOnce("taskbar-pill-placement-mismatch");
+            return;
+        }
+
+        Log.Once(LogLevel.Warn, "taskbar-pill-placement-mismatch",
+            $"贴片位置未生效: 期望=({expectX},{expectY}) 实际=({actual.Left},{actual.Top}) " +
+            $"窗口尺寸={actual.Width}x{actual.Height} 期望尺寸={_pillW}x{_pillH} " +
+            $"dragging={_dragging} 父窗口=0x{Native.GetParent(_hwnd).ToInt64():X}");
     }
 
     /// <summary>把记下的偏移换算成当前任务栏 DPI 下的物理像素；旧配置 Dpi=0 时首次只绑定、不改像素。</summary>
